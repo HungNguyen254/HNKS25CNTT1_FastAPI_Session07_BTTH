@@ -1,44 +1,58 @@
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, status, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from datetime import datetime
 app = FastAPI()
-products_db = [
-    {"id": 101, "name": "Bàn phím cơ", "stock": 5, "price": 1200000.0},
-    {"id": 102, "name": "Chuột Gaming", "stock": 2, "price": 600000.0}
-]
-orders_db = []
-class OrderCreate(BaseModel):
-    product_id: int
-    quantity: int
-@app.post("/orders", status_code=status.HTTP_201_CREATED)
-def create_order(data: OrderCreate):
-    product = next(
-        (p for p in products_db if p["id"] == data.product_id),
-        None
+promo_codes_db = {
+    "SUMMER25": {
+        "code": "SUMMER25",
+        "discount_rate": 0.15,
+        "max_budget": 50000000,
+        "is_active": True
+    },
+    "WELCOME50": {
+        "code": "WELCOME50",
+        "discount_rate": 0.50,
+        "max_budget": 10000000,
+        "is_active": False
+    }
+}
+class PromoInternal(BaseModel):
+    code: str
+    discount_rate: float
+    max_budget: int
+    is_active: bool
+class PromoPublic(BaseModel):
+    code: str
+    discount_rate: float
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "statusCode": exc.status_code,
+            "data": None,
+            "error": True,
+            "message": exc.detail,
+            "timestamp": datetime.now().isoformat(),
+            "path": request.url.path
+        }
     )
-    if product is None:
+@app.get(
+    "/promos/{code}",
+    response_model=PromoPublic,
+    status_code=status.HTTP_200_OK
+)
+def get_promo(code: str):
+    if code not in promo_codes_db:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Sản phẩm không tồn tại"
+            detail="Mã giảm giá không tồn tại"
         )
-    if data.quantity <= 0:
+    promo = promo_codes_db[code]
+    if promo["is_active"] is False:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Số lượng mua phải lớn hơn 0"
+            detail="Mã giảm giá đã hết hạn sử dụng"
         )
-    if data.quantity > product["stock"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Sản phẩm không đủ số lượng trong kho"
-        )
-    product["stock"] -= data.quantity
-    order = {
-        "id": len(orders_db) + 1,
-        "product_id": data.product_id,
-        "quantity": data.quantity,
-        "total_amount": data.quantity * product["price"]
-    }
-    orders_db.append(order)
-    return {
-        "message": "Tạo đơn hàng thành công",
-        "data": order
-    }
+    return promo
